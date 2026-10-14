@@ -1,0 +1,13 @@
+# Project conventions
+
+- Use English for source identifiers, comments, documentation, filenames,
+  developer diagnostics, and build scripts.
+- Keep user-facing translations in `Resources/<language>.lproj/Localizable.strings`.
+  Use English localization keys in Swift source through `AppStrings.text`.
+- Keep the app interface in Spanish until the user requests a language change.
+- Preserve GPLv3 and the attribution notices for gsanz.dev.
+- When adding or removing Swift files or localized resources, regenerate the
+  Xcode project with `python3 Tools/make_project.py`. This resets manual project
+  settings, including the signing Team; preserve any existing customizations.
+- Each build must package the corresponding source, including localization
+  resources and legal files, through `Tools/package_source.py`.
