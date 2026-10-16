@@ -11,12 +11,46 @@ extension MapPoint {
 
 @MainActor
 enum StrokeRenderer {
+    static func drawStack(_ strokes: [InkStroke], in context: CGContext) {
+        // Draft marks stay below finished ink even when the sketch is edited later.
+        for color in [InkColor.shadow, .ink] {
+            for stroke in strokes where stroke.color == color { draw(stroke, in: context) }
+        }
+    }
+
     static func draw(_ stroke: InkStroke, in context: CGContext) {
         let samples = stroke.renderedSamples()
         guard let first = samples.first else { return }
+        context.saveGState()
+        if !stroke.erasures.isEmpty { context.beginTransparencyLayer(auxiliaryInfo: nil) }
+        defer {
+            if !stroke.erasures.isEmpty {
+                context.setBlendMode(.clear)
+                for sweep in stroke.erasures {
+                    guard let first = sweep.points.first else { continue }
+                    context.setLineWidth(sweep.radius * 2)
+                    context.setLineCap(.round)
+                    context.setLineJoin(.round)
+                    context.setFillColor(UIColor.black.cgColor)
+                    context.setStrokeColor(UIColor.black.cgColor)
+                    if sweep.points.count == 1 {
+                        context.fillEllipse(in: CGRect(x: first.x - sweep.radius, y: first.y - sweep.radius,
+                                                       width: sweep.radius * 2, height: sweep.radius * 2))
+                    } else {
+                        context.beginPath()
+                        context.move(to: first.cgPoint)
+                        for point in sweep.points.dropFirst() { context.addLine(to: point.cgPoint) }
+                        context.strokePath()
+                    }
+                }
+                context.setBlendMode(.normal)
+                context.endTransparencyLayer()
+            }
+            context.restoreGState()
+        }
         let color: UIColor = stroke.color == .ink
-            ? UIColor(red: 0.12, green: 0.14, blue: 0.14, alpha: 1)
-            : UIColor(red: 0.64, green: 0.66, blue: 0.65, alpha: 1)
+            ? UIColor(white: 0.12, alpha: 1)
+            : UIColor(white: 0.60, alpha: 1)
         context.setStrokeColor(color.cgColor)
         context.setFillColor(color.cgColor)
         context.setLineCap(.round)

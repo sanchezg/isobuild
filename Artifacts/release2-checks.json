@@ -1,0 +1,28 @@
+{
+  "checks" : [
+    "Sketch eraser preserves overlapping fiber",
+    "Eraser clears covered pixels",
+    "Eraser preserves uncovered width of thick strokes",
+    "Eraser preserves distant stroke segments",
+    "Overlapping erasures never restore pixels",
+    "Transparency reveals underlying sketch instead of painting white",
+    "Raster and world coordinates agree",
+    "Bucket respects enclosed holes",
+    "Bucket detects an outline opened with the partial eraser",
+    "Undo restores a complete eraser gesture",
+    "Redo restores partial erasures",
+    "Saved partial erasures survive reopening",
+    "Canvas registers its Pencil interaction delegate",
+    "First double-tap switches fiber to eraser",
+    "Repeated double-tap returns to the previous tool",
+    "Selecting the same tool preserves distinct tool history",
+    "Selecting a third tool updates the alternating pair",
+    "Double-tap cannot change an active stroke's tool",
+    "Double-tap cannot change tools during a fill",
+    "Disabled system double-tap leaves the tool unchanged",
+    "Ignored double-taps preserve tool history",
+    "Tool switching preserves eraser, pen, pressure, and texture settings",
+    "Tool switching does not alter the document or undo history"
+  ],
+  "status" : "passed"
+}

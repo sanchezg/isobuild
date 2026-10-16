@@ -6,14 +6,36 @@
 from pathlib import Path
 from hashlib import sha1
 import json
+import subprocess
 
 root = Path(__file__).resolve().parents[1]
 project_dir = root / "IsoBuild.xcodeproj"
 project_dir.mkdir(exist_ok=True)
+existing_objects = {}
+project_file = project_dir / "project.pbxproj"
+if project_file.exists():
+    existing_objects = json.loads(subprocess.check_output(
+        ["plutil", "-convert", "json", "-o", "-", str(project_file)]))["objects"]
 
 
 def key(name):
     return sha1(name.encode()).hexdigest()[:24].upper()
+
+
+def plist_value(value):
+    if isinstance(value, dict):
+        return "{ " + " ".join(f"{json.dumps(k)} = {plist_value(v)};" for k, v in sorted(value.items())) + " }"
+    if isinstance(value, list):
+        return "(" + ",".join(plist_value(item) for item in value) + ("," if value else "") + ")"
+    return json.dumps(str(value))
+
+
+def configuration_settings(name, defaults, overrides=None):
+    values = json.loads(subprocess.check_output(
+        ["plutil", "-convert", "json", "-o", "-", "--", "-"], input=("{" + defaults + "}").encode()))
+    values.update(existing_objects.get(key(name), {}).get("buildSettings", {}))
+    values.update(overrides or {})
+    return plist_value(values)
 
 
 objects = []
@@ -50,7 +72,7 @@ sources = add("sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483
 frameworks = add("frameworks", "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;")
 resources = add("resources", f"isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({','.join(resource_builds)},); runOnlyForDeploymentPostprocessing = 0;")
 source_script = json.dumps('set -eu\n/usr/bin/python3 "$SRCROOT/Tools/package_source.py" --output "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/IsoBuild-Source.zip"\n')
-archive_inputs = {"", "LICENSE", "ATTRIBUTION.md", "LICENSING.md", "README.md", "DECISIONS.md", "AGENTS.md", "Package.swift", ".gitignore",
+archive_inputs = {"", "LICENSE", "ATTRIBUTION.md", "LICENSING.md", "README.md", "DECISIONS.md", "RELEASE_NOTES.md", "AGENTS.md", "Package.swift", ".gitignore",
                   "IsoBuild.xcodeproj/project.pbxproj", "IsoBuild.xcodeproj/xcshareddata", "IsoBuild.xcodeproj/xcshareddata/xcschemes",
                   "IsoBuild.xcodeproj/xcshareddata/xcschemes/IsoBuild.xcscheme"}
 for directory in ["Sources", "Tests", "Resources", "Config", "Tools", "IsoBuild.xcodeproj"]:
@@ -73,7 +95,7 @@ for config in ["Debug", "Release"]:
     settings += "SWIFT_OPTIMIZATION_LEVEL = \"-Onone\"; DEBUG_INFORMATION_FORMAT = dwarf;" if config == "Debug" else 'SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";'
     if config == "Debug":
         settings += ' SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";'
-    project_configs.append(add(f"project-{config}", f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ {settings} }};'))
+    project_configs.append(add(f"project-{config}", f'isa = XCBuildConfiguration; name = {config}; buildSettings = {configuration_settings(f"project-{config}", settings)};'))
     settings = """
         PRODUCT_NAME = IsoBuild;
         PRODUCT_BUNDLE_IDENTIFIER = net.gonzalo.IsoBuild;
@@ -85,15 +107,15 @@ for config in ["Debug", "Release"]:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-        MARKETING_VERSION = 0.1.0;
-        CURRENT_PROJECT_VERSION = 1;
+        MARKETING_VERSION = 0.2.0;
+        CURRENT_PROJECT_VERSION = 3;
         CODE_SIGN_STYLE = Automatic;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
         SUPPORTS_MACCATALYST = NO;
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
         SWIFT_EMIT_LOC_STRINGS = YES;
     """
-    target_configs.append(add(f"target-{config}", f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ {settings} }};'))
+    target_configs.append(add(f"target-{config}", f'isa = XCBuildConfiguration; name = {config}; buildSettings = {configuration_settings(f"target-{config}", settings, {"MARKETING_VERSION": "0.2.0", "CURRENT_PROJECT_VERSION": "3"})};'))
 
 project_config_list = add("project-configs", f"isa = XCConfigurationList; buildConfigurations = ({','.join(project_configs)},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;")
 target_config_list = add("target-configs", f"isa = XCConfigurationList; buildConfigurations = ({','.join(target_configs)},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;")
@@ -104,7 +126,9 @@ add("project", f'isa = PBXProject; attributes = {{ BuildIndependentTargetsInPara
 scheme_dir = project_dir / "xcshareddata" / "xcschemes"
 scheme_dir.mkdir(parents=True, exist_ok=True)
 reference = f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="IsoBuild.app" BlueprintName="IsoBuild" ReferencedContainer="container:IsoBuild.xcodeproj"/>'
-(scheme_dir / "IsoBuild.xcscheme").write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
+scheme_file = scheme_dir / "IsoBuild.xcscheme"
+if not scheme_file.exists():
+    scheme_file.write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="2700" version="1.3">
   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">{reference}</BuildActionEntry></BuildActionEntries></BuildAction>
   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"/>

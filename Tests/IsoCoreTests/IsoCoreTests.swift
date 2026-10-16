@@ -91,7 +91,7 @@ final class IsoCoreTests: XCTestCase {
         XCTAssertEqual(decoded, document)
         XCTAssertNoThrow(try decoded.validate())
         var invalid = document
-        invalid.formatVersion = 2
+        invalid.formatVersion = 3
         XCTAssertThrowsError(try invalid.validate())
     }
 }

@@ -24,6 +24,41 @@ struct InkStroke: Codable, Equatable, Identifiable, Sendable {
     var startAnchor: MapPoint?
     var endAnchor: MapPoint?
     var endpointBlend: Double = 18
+    var erasures: [ErasureSweep] = []
+    var texture: TexturePattern? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, samples, width, color, usesPressure, startAnchor, endAnchor, endpointBlend, erasures, texture
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        samples = try values.decode([InkSample].self, forKey: .samples)
+        width = try values.decode(Double.self, forKey: .width)
+        color = try values.decode(InkColor.self, forKey: .color)
+        usesPressure = try values.decode(Bool.self, forKey: .usesPressure)
+        startAnchor = try values.decodeIfPresent(MapPoint.self, forKey: .startAnchor)
+        endAnchor = try values.decodeIfPresent(MapPoint.self, forKey: .endAnchor)
+        endpointBlend = try values.decodeIfPresent(Double.self, forKey: .endpointBlend) ?? 18
+        erasures = try values.decodeIfPresent([ErasureSweep].self, forKey: .erasures) ?? []
+        texture = try values.decodeIfPresent(TexturePattern.self, forKey: .texture)
+    }
+
+    init(id: UUID = UUID(), samples: [InkSample], width: Double, color: InkColor,
+         usesPressure: Bool, startAnchor: MapPoint? = nil, endAnchor: MapPoint? = nil,
+         endpointBlend: Double = 18, erasures: [ErasureSweep] = [], texture: TexturePattern? = nil) {
+        self.id = id
+        self.samples = samples
+        self.width = width
+        self.color = color
+        self.usesPressure = usesPressure
+        self.startAnchor = startAnchor
+        self.endAnchor = endAnchor
+        self.endpointBlend = endpointBlend
+        self.erasures = erasures
+        self.texture = texture
+    }
 
     /// Original samples are immutable. Corrections fade in the small end regions;
     /// the middle is unchanged, with no straightening or synthetic wobble.
@@ -78,15 +113,16 @@ struct InkStroke: Codable, Equatable, Identifiable, Sendable {
 }
 
 struct MapDocument: Codable, Equatable, Sendable {
-    var formatVersion = 1
+    var formatVersion = 2
     var grid = IsoGrid()
     var strokes: [InkStroke] = []
 
     func validate() throws {
-        guard formatVersion == 1, grid.spacing.isFinite, (20...100).contains(grid.spacing),
+        guard (1...2).contains(formatVersion), grid.spacing.isFinite, (20...100).contains(grid.spacing),
               strokes.allSatisfy({ stroke in
                   !stroke.samples.isEmpty && stroke.width.isFinite && (0.1...20).contains(stroke.width) &&
                   stroke.endpointBlend.isFinite && stroke.endpointBlend > 0 &&
+                  stroke.erasures.allSatisfy { $0.isValid } &&
                   [stroke.startAnchor, stroke.endAnchor].compactMap { $0 }.allSatisfy { $0.x.isFinite && $0.y.isFinite } &&
                   stroke.samples.allSatisfy { $0.point.x.isFinite && $0.point.y.isFinite && $0.pressure.isFinite }
               }) else { throw DocumentError.invalidData }

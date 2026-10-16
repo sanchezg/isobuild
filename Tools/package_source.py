@@ -15,7 +15,7 @@ output = Path(args.output)
 output.parent.mkdir(parents=True, exist_ok=True)
 
 files = [root / name for name in [
-    "LICENSE", "ATTRIBUTION.md", "LICENSING.md", "README.md", "DECISIONS.md", "AGENTS.md",
+    "LICENSE", "ATTRIBUTION.md", "LICENSING.md", "README.md", "DECISIONS.md", "RELEASE_NOTES.md", "AGENTS.md",
     "Package.swift", ".gitignore",
 ]]
 for directory in ["Sources", "Tests", "Resources", "Config", "Tools", "IsoBuild.xcodeproj"]:

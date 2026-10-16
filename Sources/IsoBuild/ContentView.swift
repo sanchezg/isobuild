@@ -29,8 +29,8 @@ struct ContentView: View {
             ZStack(alignment: .bottom) {
                 CanvasRepresentable(model: model)
                 VStack(spacing: 12) {
-                    if model.document.strokes.isEmpty {
-                        Text(AppStrings.text("Place the Pencil on a dot and draw toward another"))
+                    if model.document.strokes.isEmpty || model.tool == .texture {
+                        Text(AppStrings.text(model.tool == .texture ? "Choose a texture and tap inside a closed area" : "Place the Pencil on a dot and draw toward another"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 18).padding(.vertical, 10)
@@ -40,6 +40,12 @@ struct ContentView: View {
                     drawingTools
                 }
                 .padding(.bottom, 20)
+                if model.isFilling {
+                    ProgressView(AppStrings.text("Applying texture"))
+                        .padding(24)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             footer
         }
@@ -81,41 +87,76 @@ struct ContentView: View {
             icon(AppStrings.text("Credits and license"), "info.circle") { showsAbout = true }
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
-        .disabled(model.isDrawing)
+        .disabled(model.isDrawing || model.isFilling)
     }
 
     private var drawingTools: some View {
-        HStack(spacing: 8) {
-            toolButton(AppStrings.text("Ink"), "pencil.tip", tool: .ink)
-            toolButton(AppStrings.text("Gray shadow"), "highlighter", tool: .shadow)
-            Divider().frame(height: 24).padding(.horizontal, 4)
-            ForEach([0.8, 1.6, 3.2], id: \.self) { width in
-                Button {
-                    model.penWidth = width
-                    if model.tool == .eraser { model.tool = .ink }
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(model.penWidth == width ? accent.opacity(0.12) : .clear)
-                        Capsule().fill(accent).frame(width: 22, height: width * 2)
-                    }.frame(width: 40, height: 44)
+        VStack(spacing: 8) {
+            if model.tool == .eraser {
+                Picker(AppStrings.text("Eraser target"), selection: $model.eraserTarget) {
+                    Text(AppStrings.text("Sketch eraser")).tag(EraserTarget.sketch)
+                    Text(AppStrings.text("Fiber eraser (everything)")).tag(EraserTarget.all)
                 }
-                .accessibilityLabel(width == 0.8 ? AppStrings.text("Thin stroke") : width == 1.6 ? AppStrings.text("Medium stroke") : AppStrings.text("Thick stroke"))
-                .accessibilityAddTraits(model.penWidth == width ? .isSelected : [])
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 480)
+            } else if model.tool == .texture {
+                Picker(AppStrings.text("Texture"), selection: $model.texturePattern) {
+                    ForEach(TexturePattern.allCases, id: \.self) { pattern in
+                        Text(AppStrings.text(pattern.title)).tag(pattern)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 480)
             }
-            Divider().frame(height: 24).padding(.horizontal, 4)
-            toolButton(AppStrings.text("Stroke eraser"), "eraser", tool: .eraser)
-            icon(model.showsGrid ? AppStrings.text("Hide dots") : AppStrings.text("Show dots"), model.showsGrid ? "circle.grid.3x3.fill" : "circle.grid.3x3") {
-                model.showsGrid.toggle()
+            HStack(spacing: 6) {
+                toolButton(AppStrings.text("Sketch pencil"), "pencil", tool: .sketch)
+                toolButton(AppStrings.text("Fiber pen"), "pencil.tip", tool: .fiber)
+                Divider().frame(height: 24).padding(.horizontal, 4)
+                if model.tool == .eraser {
+                    ForEach(EraserSize.allCases, id: \.self) { size in
+                        Button { model.eraserSize = size } label: {
+                            Circle().strokeBorder(accent, lineWidth: 1.5)
+                                .frame(width: size == .small ? 9 : size == .medium ? 17 : 27,
+                                       height: size == .small ? 9 : size == .medium ? 17 : 27)
+                                .frame(width: 40, height: 44)
+                                .background(model.eraserSize == size ? accent.opacity(0.12) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .accessibilityLabel(AppStrings.text(size == .small ? "Small eraser" : size == .medium ? "Medium eraser" : "Large eraser"))
+                        .accessibilityAddTraits(model.eraserSize == size ? .isSelected : [])
+                    }
+                } else {
+                ForEach([0.8, 1.6, 3.2], id: \.self) { width in
+                    Button {
+                        model.penWidth = width
+                        if model.tool == .texture { model.tool = .fiber }
+                    } label: {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(model.penWidth == width ? accent.opacity(0.12) : .clear)
+                            Capsule().fill(accent).frame(width: 22, height: width * 2)
+                        }.frame(width: 40, height: 44)
+                    }
+                    .accessibilityLabel(width == 0.8 ? AppStrings.text("Thin stroke") : width == 1.6 ? AppStrings.text("Medium stroke") : AppStrings.text("Thick stroke"))
+                    .accessibilityAddTraits(model.penWidth == width ? .isSelected : [])
+                }
+                }
+                Divider().frame(height: 24).padding(.horizontal, 4)
+                toolButton(AppStrings.text("Eraser"), "eraser", tool: .eraser)
+                toolButton(AppStrings.text("Texture fill"), "square.on.circle", tool: .texture)
+                icon(AppStrings.text("Undo"), "arrow.uturn.backward", disabled: model.undoHistory.isEmpty) { model.undo() }
+                icon(model.showsGrid ? AppStrings.text("Hide dots") : AppStrings.text("Show dots"), model.showsGrid ? "circle.grid.3x3.fill" : "circle.grid.3x3") {
+                    model.showsGrid.toggle()
+                }
+                icon(AppStrings.text("Fit drawing"), "viewfinder") { model.canvas?.fitDrawing() }
             }
-            icon(AppStrings.text("Fit drawing"), "viewfinder") { model.canvas?.fitDrawing() }
         }
         .buttonStyle(.plain)
         .padding(8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.black.opacity(0.06)))
         .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
-        .disabled(model.isDrawing)
+        .disabled(model.isDrawing || model.isFilling)
     }
 
     private var footer: some View {
@@ -155,13 +196,15 @@ struct ContentView: View {
                 }
                 Toggle(AppStrings.text("Show dots"), isOn: $model.showsGrid)
             }
-            Section("Pencil") {
+            Section(AppStrings.text("Pencil")) {
                 Toggle(AppStrings.text("Pressure-sensitive width"), isOn: $model.pressureEnabled)
                 Text(AppStrings.text("Applies to new strokes. Guided mode only adjusts endpoints near valid dots."))
                     .font(.caption).foregroundStyle(.secondary)
+                Text(AppStrings.text("Double-tap Apple Pencil to switch between the last two tools. Enable double-tap in iPad settings."))
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                Text(AppStrings.text("One stroke per contact. Use Freehand for cracks, curves, and details. The eraser removes whole strokes."))
+                Text(AppStrings.text("Sketch in gray, finish in black. The sketch eraser preserves fiber. The fiber eraser removes everything under its circle. Tap a closed area to apply texture."))
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         }
@@ -171,8 +214,12 @@ struct ContentView: View {
 
     private func toolButton(_ label: String, _ image: String, tool: DrawingTool) -> some View {
         Button { model.tool = tool } label: {
-            Image(systemName: image).font(.system(size: 19))
-                .frame(width: 44, height: 44)
+            VStack(spacing: 2) {
+                Image(systemName: image).font(.system(size: 19))
+                    .foregroundStyle(tool == .sketch ? Color.gray : Color.primary)
+                Text(label).font(.system(size: 10)).lineLimit(2).multilineTextAlignment(.center)
+            }
+                .frame(width: 74, height: 54)
                 .background(model.tool == tool ? accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 10))
         }
         .accessibilityLabel(label)

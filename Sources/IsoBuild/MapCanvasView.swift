@@ -18,7 +18,7 @@ struct CanvasRepresentable: UIViewRepresentable {
 }
 
 @MainActor
-final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
+final class MapCanvasView: UIView, UIGestureRecognizerDelegate, UIPencilInteractionDelegate {
     private let model: DrawingModel
     private var zoom: Double = 1
     private var offset = MapPoint.zero
@@ -29,8 +29,10 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
     private var startNode: GridNode?
     private var endCandidate: GridNode?
     private var erasedIDs: Set<UUID> = []
+    private var eraserPath: [MapPoint] = []
     private var previousEraserPoint: MapPoint?
     private var eraserPoint: MapPoint?
+    private var textureTapOrigin: CGPoint?
     private var panOrigin = MapPoint.zero
     private var pinchWorld = MapPoint.zero
     private var pinchZoom: Double = 1
@@ -46,6 +48,7 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
         contentMode = .redraw
         accessibilityLabel = AppStrings.text("Isometric canvas")
         accessibilityHint = AppStrings.text("Draw with Apple Pencil. Use two fingers to pan and zoom.")
+        addInteraction(UIPencilInteraction(delegate: self))
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panCanvas(_:)))
         pan.minimumNumberOfTouches = 2
@@ -61,6 +64,16 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+        handlePencilDoubleTap(preferredAction: UIPencilInteraction.preferredTapAction)
+    }
+
+    func handlePencilDoubleTap(preferredAction: UIPencilPreferredAction) {
+        guard preferredAction != .ignore else { return }
+        model.switchToPreviousTool()
+        setNeedsDisplay()
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -92,10 +105,9 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
         context.saveGState()
         context.translateBy(x: offset.x, y: offset.y)
         context.scaleBy(x: zoom, y: zoom)
-        for stroke in model.document.strokes where !erasedIDs.contains(stroke.id) {
-            StrokeRenderer.draw(stroke, in: context)
-        }
-        if let currentStroke { StrokeRenderer.draw(currentStroke, in: context) }
+        var strokes = strokesWithCurrentErasure()
+        if let currentStroke { strokes.append(currentStroke) }
+        StrokeRenderer.drawStack(strokes, in: context)
         context.restoreGState()
         drawAnchor(startNode, in: context, filled: true)
         drawAnchor(endCandidate, in: context, filled: false)
@@ -103,7 +115,8 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
             context.setStrokeColor(UIColor.systemGray.cgColor)
             context.setLineWidth(1)
             let center = screenPoint(eraserPoint)
-            context.strokeEllipse(in: CGRect(x: center.x - 12, y: center.y - 12, width: 24, height: 24))
+            let radius = model.eraserSize.rawValue * zoom
+            context.strokeEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
         }
     }
 
@@ -151,18 +164,20 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard activeTouch == nil, let touch = touches.first(where: accepts) else { return }
+        guard activeTouch == nil, !model.isFilling, let touch = touches.first(where: accepts) else { return }
         activeTouch = touch
         model.isDrawing = true
         lastTimestamp = -.infinity
         let point = worldPoint(touch.location(in: self))
         if model.tool == .eraser {
             erase(at: point)
+        } else if model.tool == .texture {
+            textureTapOrigin = touch.location(in: self)
         } else {
             let grid = model.document.grid
             startNode = model.guided ? grid.nearbyNode(to: point, tolerance: 14 / zoom) : nil
-            currentStroke = InkStroke(samples: [], width: model.tool == .shadow ? model.penWidth * 5 : model.penWidth,
-                                      color: model.tool == .shadow ? .shadow : .ink,
+            currentStroke = InkStroke(samples: [], width: model.penWidth,
+                                      color: model.tool == .sketch ? .shadow : .ink,
                                       usesPressure: model.pressureEnabled,
                                       startAnchor: startNode.map { grid.point($0) }, endAnchor: nil,
                                       endpointBlend: 18 / zoom)
@@ -175,7 +190,7 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
         guard let touch = activeTouch, touches.contains(touch) else { return }
         if model.tool == .eraser {
             for sample in event?.coalescedTouches(for: touch) ?? [touch] { erase(at: worldPoint(sample.location(in: self))) }
-        } else {
+        } else if model.tool != .texture {
             append(touch, event: event)
         }
         setNeedsDisplay()
@@ -185,7 +200,19 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
         guard let touch = activeTouch, touches.contains(touch) else { return }
         if model.tool == .eraser {
             erase(at: worldPoint(touch.location(in: self)))
-            model.remove(ids: erasedIDs)
+            if !erasedIDs.isEmpty {
+                var next = model.document
+                next.strokes = strokesWithCurrentErasure().filter { !$0.isFullyErased }
+                next.formatVersion = 2
+                model.commit(next)
+            }
+        } else if model.tool == .texture {
+            let location = touch.location(in: self)
+            let shouldFill = textureTapOrigin.map { hypot($0.x - location.x, $0.y - location.y) <= 12 } ?? false
+            let point = worldPoint(location)
+            resetInput()
+            if shouldFill { model.fill(at: point) }
+            return
         } else {
             append(touch, event: event)
             if var stroke = currentStroke, !stroke.samples.isEmpty {
@@ -217,17 +244,26 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func erase(at point: MapPoint) {
-        // Sample the eraser sweep so fast movements don't miss thin strokes.
         let previous = previousEraserPoint ?? point
-        let steps = max(1, Int(ceil(previous.distance(to: point) / (6 / zoom))))
-        for step in 1...steps {
-            let sample = previous + (point - previous) * (Double(step) / Double(steps))
-            for stroke in model.document.strokes.reversed() where !erasedIDs.contains(stroke.id) {
-                if stroke.intersects(sample, tolerance: 10 / zoom) { erasedIDs.insert(stroke.id) }
-            }
+        let segment = ErasureSweep(points: [previous, point], radius: model.eraserSize.rawValue)
+        for stroke in model.document.strokes where !erasedIDs.contains(stroke.id) {
+            guard model.eraserTarget == .all || stroke.color == .shadow else { continue }
+            if segment.intersects(stroke) { erasedIDs.insert(stroke.id) }
         }
+        if eraserPath.last != point { eraserPath.append(point) }
         previousEraserPoint = point
         eraserPoint = point
+    }
+
+    private func strokesWithCurrentErasure() -> [InkStroke] {
+        guard !eraserPath.isEmpty else { return model.document.strokes }
+        let sweep = ErasureSweep(points: eraserPath, radius: model.eraserSize.rawValue)
+        return model.document.strokes.map { stroke in
+            guard erasedIDs.contains(stroke.id) else { return stroke }
+            var result = stroke
+            result.erasures.append(sweep)
+            return result
+        }
     }
 
     private func resetInput() {
@@ -236,13 +272,15 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
         startNode = nil
         endCandidate = nil
         erasedIDs.removeAll()
+        eraserPath.removeAll()
         previousEraserPoint = nil
         eraserPoint = nil
+        textureTapOrigin = nil
         model.isDrawing = false
         setNeedsDisplay()
     }
 
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool { activeTouch == nil }
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool { activeTouch == nil && !model.isFilling }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -302,7 +340,7 @@ final class MapCanvasView: UIView, UIGestureRecognizerDelegate {
             context.fill(CGRect(origin: .zero, size: size))
             context.scaleBy(x: scale, y: scale)
             context.translateBy(x: -rect.minX, y: -rect.minY)
-            for stroke in model.document.strokes { StrokeRenderer.draw(stroke, in: context) }
+            StrokeRenderer.drawStack(model.document.strokes, in: context)
         }
     }
 }

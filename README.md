@@ -1,6 +1,7 @@
 # IsoBuild
 
-A native isometric drawing prototype for iPad and Apple Pencil.
+A native isometric drawing app for iPad and Apple Pencil. Release 2: version 0.2.0,
+build 3. See [RELEASE_NOTES.md](RELEASE_NOTES.md).
 The interface currently runs in Spanish. No accounts, external dependencies,
 or network services are required.
 
@@ -58,14 +59,27 @@ and [Developer Mode](https://developer.apple.com/documentation/xcode/enabling-de
   of the stroke remain unchanged, without straightening or artificial wobble.
 - Choose one of three fixed widths. Enable **Pressure-sensitive width** in
   **Settings** to apply pressure to new strokes. Existing strokes keep their width.
-- Black ink and an opaque gray marker are available. The eraser removes whole
-  strokes; each eraser gesture is one undo action.
+- **Sketch pencil** draws gray drafts; **Fiber pen** draws black final marks
+  above the sketch. Both share three widths and optional pressure sensitivity.
+- Double-tap the Apple Pencil barrel to alternate between the last two distinct
+  tools, initially fiber and eraser. Tool settings are preserved. Enable
+  double-tap in iPad settings; taps during a stroke or fill are ignored.
+- Erasing removes only the covered area. Choose **Sketch eraser** for gray
+  pencil, or **Fiber eraser (everything)** for pencil, fiber, and textures.
+  Three sizes are available; the circle shows the actual area. Each complete
+  eraser gesture is one undo action. Undo is also available in the bottom bar.
+- **Texture fill:** choose stone, brick, wood, or tiles, then tap inside a closed
+  area with the Pencil. Visible pencil/fiber outlines form boundaries; guide
+  dots and previous textures do not. Enclosed holes stay empty. A second fill
+  replaces the texture in that area. Marks are monochrome, slightly irregular
+  vector strokes aligned to the map's 30°/45° grid.
 - Use two fingers to pan and zoom. The framing button fits the drawing.
 - Hide the dot grid without disabling guided mode.
 - Choose 30°/45° and grid spacing in **Settings before drawing**. To change them
   later, erase or undo all strokes until the map is empty.
 
-A single map is saved locally after each action. There is no map gallery or
+A single map is saved locally after each action. Release 1 maps remain readable
+and their original file is backed up locally before editing. There is no map gallery or
 new-map button yet. Undo/redo retains up to 100 actions in the current session;
 its history is not restored after closing the app.
 
@@ -82,20 +96,24 @@ xcodebuild -project IsoBuild.xcodeproj -scheme IsoBuild \
   -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build
 ```
 
-The Swift package tests 30°/45° geometry, destination selection, snapping
-tolerance, preservation of the sampled path and pressure, erasing, and document
-serialization. The app compiles the same core files directly, without package
-downloads.
+The Swift package tests geometry, snapping, sample/pressure preservation,
+selective partial erasure, release 1 loading, flood fill, texture generation,
+and persistence. The app compiles the same core files without package downloads.
 
-Verified on October 14, 2026 with Xcode 27.0: device and simulator builds,
-eight passing core tests, and a visible launch on an iPad Air 11-inch (M4)
-simulator running iPadOS 26.5. Screenshots are in `Artifacts/ipad-prototype.png`
-and `Artifacts/ipad-credits.png`. Interactive drawing gestures and physical
-Apple Pencil input still require verification.
+Release 2 verification uses 16 core tests and opt-in native rendering checks
+on an iPad Air 11-inch (M4) simulator. Native checks validate pixel erasure,
+overlapping marks, enclosed holes, opened outlines, undo/redo, persistence,
+Pencil interaction registration, and tool switching with preserved settings.
+Run a Debug simulator build with `--release2-preview` to execute them using
+temporary storage and display all four textures; add `--preview-eraser` for
+the eraser controls. The report is `tmp/release2-checks.json` inside the app
+container. This mode never opens the normal saved map. Interactive gestures
+and physical Pencil pressure still require verification on the iPad.
 
 The generated project is ready to open. After adding or removing Swift files
 or language resources, regenerate it with `python3 Tools/make_project.py`.
-This resets project settings, including any manually selected signing Team.
+Existing build settings, including the signing Team, and the shared scheme are
+preserved. The generator explicitly sets the app version and build number.
 
 Mouse drawing is available in the simulator for interface checks. On a physical
 iPad only Apple Pencil draws; fingers navigate the canvas.
@@ -110,11 +128,14 @@ endpoint connections feel. On the iPad, check:
 3. Verticals and both diagonals at different zoom levels.
 4. Freehand mode, pressure enabled/disabled, and palm rejection.
 5. Erasing, undo/redo, closing and reopening the app, and PNG export.
+6. Pencil double-tap alternates the last two tools and respects the system's
+   disabled setting; selecting a third tool updates the pair.
 
 ## Files
 
 - `AGENTS.md`: project language and maintenance conventions.
 - `DECISIONS.md`: confirmed requirements and prototype scope.
+- `RELEASE_NOTES.md`: release 2 changes and usage.
 - `Sources/IsoCore`: grid geometry, strokes, and serializable documents.
 - `Sources/IsoBuild`: interface, Pencil input, rendering, and persistence.
 - `Resources`: English keys and Spanish interface translations.
