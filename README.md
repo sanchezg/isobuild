@@ -5,6 +5,14 @@ build 3. See [RELEASE_NOTES.md](RELEASE_NOTES.md).
 The interface currently runs in Spanish. No accounts, external dependencies,
 or network services are required.
 
+## Simulator screenshots
+
+Release 2 running on the iPad Air 11-inch (M4) simulator, with the Spanish interface.
+
+| Texture fills | Partial erasing |
+| --- | --- |
+| ![Stone, brick, wood, and tile texture previews](Artifacts/ipad-release2-textures.png) | ![Partial erasing preview with eraser modes and size controls](Artifacts/ipad-release2-eraser.png) |
+
 ## Project language
 
 Source identifiers, comments, documentation, build scripts, and filenames use
