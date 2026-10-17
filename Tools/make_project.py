@@ -6,6 +6,7 @@
 from pathlib import Path
 from hashlib import sha1
 import json
+import re
 import subprocess
 
 root = Path(__file__).resolve().parents[1]
@@ -16,6 +17,34 @@ project_file = project_dir / "project.pbxproj"
 if project_file.exists():
     existing_objects = json.loads(subprocess.check_output(
         ["plutil", "-convert", "json", "-o", "-", str(project_file)]))["objects"]
+
+
+def preserve_local_signing():
+    teams = set()
+    for obj in existing_objects.values():
+        for name, value in obj.get("buildSettings", {}).items():
+            if name.startswith("DEVELOPMENT_TEAM["):
+                raise SystemExit("Move conditional signing settings to Signing.local.xcconfig before regenerating.")
+            if name == "DEVELOPMENT_TEAM" and value:
+                teams.add(value)
+    if len(teams) > 1:
+        raise SystemExit("Move configuration-specific signing teams to Signing.local.xcconfig before regenerating.")
+    if not teams:
+        return
+    team = teams.pop()
+    if not re.fullmatch(r"[A-Z0-9]{10}", team):
+        raise SystemExit("Move the custom signing Team expression to Signing.local.xcconfig before regenerating.")
+    local_file = root / "Signing.local.xcconfig"
+    content = local_file.read_text() if local_file.exists() else "// Local signing settings. Do not commit or distribute this file.\n"
+    setting = f"DEVELOPMENT_TEAM = {team}"
+    if re.search(r"(?m)^\s*DEVELOPMENT_TEAM\s*=.*$", content):
+        content = re.sub(r"(?m)^\s*DEVELOPMENT_TEAM\s*=.*$", setting, content)
+    else:
+        content = content.rstrip() + "\n" + setting + "\n"
+    local_file.write_text(content)
+
+
+preserve_local_signing()
 
 
 def key(name):
@@ -35,6 +64,7 @@ def configuration_settings(name, defaults, overrides=None):
         ["plutil", "-convert", "json", "-o", "-", "--", "-"], input=("{" + defaults + "}").encode()))
     values.update(existing_objects.get(key(name), {}).get("buildSettings", {}))
     values.update(overrides or {})
+    values.pop("DEVELOPMENT_TEAM", None)
     return plist_value(values)
 
 
@@ -56,6 +86,7 @@ for file in files:
 
 product = add("product", 'isa = PBXFileReference; explicitFileType = wrapper.application; path = IsoBuild.app; sourceTree = BUILT_PRODUCTS_DIR;')
 products = add("products", f'isa = PBXGroup; children = ({product},); name = Products; sourceTree = "<group>";')
+signing_config = add("signing-config", 'isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Config/Signing.xcconfig"; sourceTree = SOURCE_ROOT;')
 resource_refs, resource_builds = [], []
 for resource in ["LICENSE", "ATTRIBUTION.md"]:
     resource_refs.append(add(resource, f'isa = PBXFileReference; lastKnownFileType = text; path = "{resource}"; sourceTree = SOURCE_ROOT;'))
@@ -67,7 +98,7 @@ for language in ["en", "es"]:
 localized_strings = add("localized-strings", f'isa = PBXVariantGroup; children = ({",".join(language_refs)},); name = Localizable.strings; sourceTree = "<group>";')
 resource_refs.append(localized_strings)
 resource_builds.append(add("build:localized-strings", f"isa = PBXBuildFile; fileRef = {localized_strings};"))
-main_group = add("main-group", f'isa = PBXGroup; children = ({",".join(file_refs + resource_refs + [products])},); sourceTree = "<group>";')
+main_group = add("main-group", f'isa = PBXGroup; children = ({",".join(file_refs + resource_refs + [signing_config, products])},); sourceTree = "<group>";')
 sources = add("sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({','.join(build_refs)},); runOnlyForDeploymentPostprocessing = 0;")
 frameworks = add("frameworks", "isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;")
 resources = add("resources", f"isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({','.join(resource_builds)},); runOnlyForDeploymentPostprocessing = 0;")
@@ -115,7 +146,7 @@ for config in ["Debug", "Release"]:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
         SWIFT_EMIT_LOC_STRINGS = YES;
     """
-    target_configs.append(add(f"target-{config}", f'isa = XCBuildConfiguration; name = {config}; buildSettings = {configuration_settings(f"target-{config}", settings, {"MARKETING_VERSION": "0.2.0", "CURRENT_PROJECT_VERSION": "3"})};'))
+    target_configs.append(add(f"target-{config}", f'isa = XCBuildConfiguration; name = {config}; baseConfigurationReference = {signing_config}; buildSettings = {configuration_settings(f"target-{config}", settings, {"MARKETING_VERSION": "0.2.0", "CURRENT_PROJECT_VERSION": "3"})};'))
 
 project_config_list = add("project-configs", f"isa = XCConfigurationList; buildConfigurations = ({','.join(project_configs)},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;")
 target_config_list = add("target-configs", f"isa = XCConfigurationList; buildConfigurations = ({','.join(target_configs)},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;")

@@ -4,7 +4,9 @@
 
 """Bundle the corresponding project source with each compiled application."""
 import argparse
+import json
 from pathlib import Path
+import subprocess
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 root = Path(__file__).resolve().parents[1]
@@ -25,6 +27,14 @@ for directory in ["Sources", "Tests", "Resources", "Config", "Tools", "IsoBuild.
 
 if any(not file.is_file() for file in files):
     raise SystemExit("The corresponding source is incomplete; missing project or license files.")
+
+project = json.loads(subprocess.check_output([
+    "plutil", "-convert", "json", "-o", "-", str(root / "IsoBuild.xcodeproj/project.pbxproj")
+]))
+if any(value for obj in project["objects"].values()
+       for key, value in obj.get("buildSettings", {}).items()
+       if key == "DEVELOPMENT_TEAM" or key.startswith("DEVELOPMENT_TEAM[")):
+    raise SystemExit("The project contains a signing Team. Run Tools/make_project.py to move it to local settings before packaging.")
 
 with ZipFile(output, "w", compression=ZIP_DEFLATED) as archive:
     for file in sorted(set(files)):

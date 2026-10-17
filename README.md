@@ -52,6 +52,13 @@ The minimum deployment target is iPadOS 26.0, including the requested 26.6.
 The development build must be signed with your Team before installation.
 The unsigned verification build is not an installer.
 
+Keep your Team in the ignored root file `Signing.local.xcconfig` using
+`DEVELOPMENT_TEAM = YOUR_TEAM_ID`. `Config/Signing.xcconfig` optionally loads it
+for both Debug and Release. The project generator migrates a Team selected in
+Xcode to this local file; it is excluded from Git and source ZIPs. The source
+packager rejects projects containing an inline signing Team, so regenerate the
+project after changing the Team in Xcode and before building.
+
 Apple documentation: [running on a device](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices)
 and [Developer Mode](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device).
 
@@ -121,7 +128,8 @@ and physical Pencil pressure still require verification on the iPad.
 The generated project is ready to open. After adding or removing Swift files
 or language resources, regenerate it with `python3 Tools/make_project.py`.
 Existing build settings, including the signing Team, and the shared scheme are
-preserved. The generator explicitly sets the app version and build number.
+preserved. The Team is kept in the ignored local signing file. The generator
+explicitly sets the app version and build number.
 
 Mouse drawing is available in the simulator for interface checks. On a physical
 iPad only Apple Pencil draws; fingers navigate the canvas.
